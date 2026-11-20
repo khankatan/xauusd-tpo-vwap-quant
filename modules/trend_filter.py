@@ -2,14 +2,37 @@ import numpy as np
 import pandas as pd
 
 
+def compute_kama(series: pd.Series, er_period: int = 16, fast_sc: int = 4, slow_sc: int = 60) -> pd.Series:
+    """คำนวณ Kaufman's Adaptive Moving Average (KAMA) ปรับความเร็วตาม Efficiency Ratio อัตโนมัติ"""
+    close_vals = series.values
+    n = len(close_vals)
+    kama = np.full(n, np.nan)
+    if n <= er_period:
+        return pd.Series(close_vals, index=series.index)
+
+    fast_alpha = 2.0 / (fast_sc + 1.0)
+    slow_alpha = 2.0 / (slow_sc + 1.0)
+    kama[er_period] = close_vals[er_period]
+
+    for i in range(er_period + 1, n):
+        change = abs(close_vals[i] - close_vals[i - er_period])
+        volatility = np.sum(np.abs(np.diff(close_vals[i - er_period:i + 1])))
+        er = (change / volatility) if volatility > 0 else 0.0
+        sc = (er * (fast_alpha - slow_alpha) + slow_alpha) ** 2
+        kama[i] = kama[i - 1] + sc * (close_vals[i] - kama[i - 1])
+
+    return pd.Series(kama, index=series.index).bfill()
+
+
 def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    df['ema_fast'] = df['close'].ewm(span=32, adjust=False).mean()
-    df['ema_slow'] = df['close'].ewm(span=96, adjust=False).mean()
-    df['ema_macro'] = df['close'].ewm(span=288, adjust=False).mean()  # เทรนด์ 3 วัน (H1/H4 Proxy)
+    # แทนที่ EMA ค่าคงที่ด้วย KAMA แบบไดนามิก 2 ระดับ (Fast Adaptive & Macro Adaptive)
+    df['kama_fast'] = compute_kama(df['close'], er_period=14, fast_sc=3, slow_sc=40)
+    df['kama_macro'] = compute_kama(df['close'], er_period=32, fast_sc=8, slow_sc=120)
+    df['kama_slope'] = ((df['kama_macro'] - df['kama_macro'].shift(4)) / df['atr']).fillna(0.0)
 
-    # Kaufman Efficiency Ratio (KER 20 แท่ง): วัดความตรงของเทรนด์ (ใกล้ 1 = เทรนด์ชัด, ใกล้ 0 = ฟันปลา/Sideway)
+    # Kaufman Efficiency Ratio (KER 20 แท่ง)
     net_change = (df['close'] - df['close'].shift(20)).abs()
     sum_volatility = df['close'].diff().abs().rolling(20).sum().replace(0, np.nan)
     df['efficiency_ratio'] = (net_change / sum_volatility).fillna(0.2)
@@ -25,12 +48,11 @@ def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     dx = (np.abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)) * 100
     df['adx'] = dx.ewm(span=14).mean().fillna(20)
 
-    # ต้องผ่านทั้ง ADX >= 20, เรียงตัวตาม EMA Macro และ Efficiency Ratio >= 0.25 จึงจะถือว่าเป็น Trend จริง
-    is_clean_trend = (df['adx'] >= 20) & (df['efficiency_ratio'] >= 0.25)
+    is_clean_trend = (df['adx'] >= 19) & (df['efficiency_ratio'] >= 0.20)
 
     conditions = [
-        is_clean_trend & (df['close'] > df['vwap']) & (df['ema_fast'] > df['ema_slow']) & (df['close'] > df['ema_macro']),
-        is_clean_trend & (df['close'] < df['vwap']) & (df['ema_fast'] < df['ema_slow']) & (df['close'] < df['ema_macro']),
+        is_clean_trend & (df['close'] > df['kama_fast']) & (df['kama_fast'] > df['kama_macro']) & (df['kama_slope'] > 0.02),
+        is_clean_trend & (df['close'] < df['kama_fast']) & (df['kama_fast'] < df['kama_macro']) & (df['kama_slope'] < -0.02),
     ]
     choices = ['TREND_UP', 'TREND_DOWN']
     df['regime'] = np.select(conditions, choices, default='BALANCE_SIDEWAY')
