@@ -35,12 +35,12 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df['vwap_lower_2'] = df['vwap'] - (2.0 * df['vwap_std'])
     df['vwap_z_atr'] = ((df['close'] - df['vwap']) / df['atr'].replace(0, np.nan)).fillna(0.0)
 
-    # 3. Dynamic Session TPO Profile (ปรับ 24 - 32 แท่ง ให้ POC เกาะติดโครงสร้างระหว่างวัน)
+    # 3. Session TPO Profile (ใช้ค่ามาตรฐาน 32 แท่งที่แม่นยำกับ V7 Core และปรับลดเหลือ 24 แท่งเฉพาะตอนผันผวนจัด)
     poc_list, vah_list, val_list = [], [], []
 
     for i in range(len(df)):
         ratio = df['atr_ratio'].iloc[i]
-        lookback = 24 if ratio > 1.05 else 32
+        lookback = 24 if ratio > 1.25 else 32
 
         if i < lookback:
             poc_list.append(df['close'].iloc[i])
