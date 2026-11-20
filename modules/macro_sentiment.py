@@ -13,7 +13,6 @@ def attach_macro_sentiment(df: pd.DataFrame, use_live_fetch: bool = True) -> pd.
             start_dt = (df['timestamp'].min() - pd.Timedelta(days=10)).strftime('%Y-%m-%d')
             end_dt = (df['timestamp'].max() + pd.Timedelta(days=2)).strftime('%Y-%m-%d')
 
-            # ใช้ interval='1d' เพื่อดึงย้อนหลัง 9 เดือนได้สมบูรณ์ และใช้ shift(1) ป้องกัน Look-ahead Bias
             dxy = yf.download('DX-Y.NYB', start=start_dt, end=end_dt, interval='1d', progress=False)
             gc = yf.download('GC=F', start=start_dt, end=end_dt, interval='1d', progress=False)
 
