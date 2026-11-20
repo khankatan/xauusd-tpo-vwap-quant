@@ -8,7 +8,7 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df = df.sort_values('timestamp').reset_index(drop=True)
     df['date'] = df['timestamp'].dt.date
 
-    # 1. ATR (14) และ ATR Ratio สำหรับปรับหน้าต่าง TPO แบบไดนามิก
+    # 1. ATR (14) และ ATR Ratio
     high_low = df['high'] - df['low']
     high_close = (df['high'] - df['close'].shift()).abs()
     low_close = (df['low'] - df['close'].shift()).abs()
@@ -35,12 +35,12 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df['vwap_lower_2'] = df['vwap'] - (2.0 * df['vwap_std'])
     df['vwap_z_atr'] = ((df['close'] - df['vwap']) / df['atr'].replace(0, np.nan)).fillna(0.0)
 
-    # 3. Dynamic TPO Profile (ปรับ Lookback 24 - 48 แท่งตามความผันผวนจริงของตลาด)
+    # 3. Dynamic Session TPO Profile (ปรับ 24 - 32 แท่ง ให้ POC เกาะติดโครงสร้างระหว่างวัน)
     poc_list, vah_list, val_list = [], [], []
 
     for i in range(len(df)):
         ratio = df['atr_ratio'].iloc[i]
-        lookback = 24 if ratio > 1.15 else (48 if ratio < 0.85 else 32)
+        lookback = 24 if ratio > 1.05 else 32
 
         if i < lookback:
             poc_list.append(df['close'].iloc[i])
