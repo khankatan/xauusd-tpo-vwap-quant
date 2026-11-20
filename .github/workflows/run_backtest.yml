@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -43,9 +45,10 @@ jobs:
 
       - name: Publish Dashboard to Repo (For GitHub Pages)
         run: |
-          cp outputs/dashboard.html index.html
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          git pull origin main --rebase || true
+          cp outputs/dashboard.html index.html
           git add -f index.html outputs/dashboard.html outputs/trade_history_export.csv
           git commit -m "Update V8 HTML dashboard and backtest report" || exit 0
-          git push
+          git push origin main
