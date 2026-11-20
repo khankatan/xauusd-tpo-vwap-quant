@@ -7,15 +7,44 @@ from modules.risk_manager import RiskManager
 from modules.strategy import TpoVwapStrategy
 
 
-def load_data(filepath: str) -> pd.DataFrame:
-    df = pd.read_csv(filepath)
-    df.columns = [c.strip().lower() for c in df.columns]
-    time_col = next((c for c in ['timestamp', 'time', 'datetime', 'date'] if c in df.columns), None)
-    if time_col != 'timestamp':
-        df.rename(columns={time_col: 'timestamp'}, inplace=True)
-    if 'volume' not in df.columns:
-        df['volume'] = df.get('tick_volume', 100.0)
-    return df
+def load_data(filepath: str, mt5_server_tz: str = 'Europe/Athens') -> pd.DataFrame:
+    # ตรวจจับตัวคั่นอัตโนมัติ (รองรับทั้ง , \t และ ;)
+    df = pd.read_csv(filepath, sep=None, engine='python')
+
+    # ล้างช่องว่างและเครื่องหมาย < > ออกจากชื่อคอลัมน์ทั้งหมด
+    df.columns = [c.strip().strip('<>').lower() for c in df.columns]
+
+    # กรณีไฟล์จาก MT5 ที่แยกคอลัมน์ date และ time ออกจากกัน
+    if 'date' in df.columns and 'time' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['date'].astype(str) + ' ' + df['time'].astype(str))
+        # แปลงเวลา Server MT5 (UTC+2/+3 ตามฤดูกาล DST) ให้เป็น UTC+0
+        df['timestamp'] = (
+            df['timestamp']
+            .dt.tz_localize(mt5_server_tz, ambiguous='NaT', nonexistent='shift_forward')
+            .dt.tz_convert('UTC')
+        )
+        df = df.dropna(subset=['timestamp']).reset_index(drop=True)
+    else:
+        time_col = next((c for c in ['timestamp', 'datetime', 'time', 'date'] if c in df.columns), None)
+        if time_col is None:
+            raise ValueError(f"ไม่พบคอลัมน์เวลาในไฟล์ CSV (คอลัมน์ที่มีคือ: {list(df.columns)})")
+        if time_col != 'timestamp':
+            df = df.rename(columns={time_col: 'timestamp'})
+        df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+
+    # จัดการคอลัมน์ Volume (MT5 มักเก็บ Volume จริงไว้ที่ tickvol ส่วน vol เป็น 0)
+    if 'tickvol' in df.columns:
+        df['volume'] = pd.to_numeric(df['tickvol'], errors='coerce').fillna(100.0)
+    elif 'tick_volume' in df.columns:
+        df['volume'] = pd.to_numeric(df['tick_volume'], errors='coerce').fillna(100.0)
+    elif 'volume' not in df.columns or (df['volume'] == 0).all():
+        df['volume'] = 100.0
+
+    # แปลงราคาเป็นตัวเลขให้ครบ
+    for col in ['open', 'high', 'low', 'close']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df.dropna(subset=['open', 'high', 'low', 'close']).reset_index(drop=True)
 
 
 def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital: float = 100000.0):
