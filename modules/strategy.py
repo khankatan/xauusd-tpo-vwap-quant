@@ -1,7 +1,7 @@
 class TpoVwapStrategy:
     def __init__(self, be_buffer: float = 0.35):
         self.be_buffer = be_buffer
-        self.active_hours = {0, 7, 10, 12, 13, 14, 15, 16, 17, 20, 21, 22}
+        self.active_hours = {0, 10, 12, 13, 14, 15, 16, 17, 21, 22}
 
     def generate_signal(self, row, prev_row, open_positions: list[dict], blocked_sides_today: set = None):
         sentiment = row['ls_sentiment']
