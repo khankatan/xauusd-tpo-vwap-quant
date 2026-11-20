@@ -1,9 +1,11 @@
 class TpoVwapStrategy:
     def __init__(self, be_buffer: float = 0.35):
         self.be_buffer = be_buffer
+        # คงชั่วโมงเทรดครบทั้ง 10 ชั่วโมง (True UTC) ไม่ตัดชั่วโมงเพื่อกัน Overfitting
         self.active_hours = {0, 2, 3, 4, 5, 6, 7, 11, 12, 14}
 
     def generate_signal(self, row, prev_row, open_positions: list[dict], blocked_sides_today: set = None):
+        regime = row['regime']
         sentiment = row['ls_sentiment']
         dxy_bias = row['dxy_bias']
         adx = row['adx']
@@ -26,7 +28,7 @@ class TpoVwapStrategy:
         if ts.weekday() == 0 and hour < 10:
             return None
 
-        # 1. โหมด Pyramiding Scale-In (ตามสูตร V7 Core ที่ทำ PF 4.04 และกำไร +$4,188)
+        # 1. โหมด Pyramiding Scale-In (Regime Gate: ยิงเฉพาะตอน TREND_UP / TREND_DOWN + SL 0.85 ATR)
         if len(open_positions) > 0:
             if er < 0.20:
                 return None
@@ -34,34 +36,36 @@ class TpoVwapStrategy:
             side = open_positions[0]['side']
             last_entry = open_positions[-1]['entry']
 
-            if side == 'BUY' and (close - last_entry) >= (0.9 * atr) and sentiment >= 0.05:
+            if side == 'BUY' and regime == 'TREND_UP' and (close - last_entry) >= (0.9 * atr) and sentiment >= 0.05:
                 if prev_row['low'] <= max(vwap, poc) and close > max(vwap, poc) and close > open_p:
                     sl = min(prev_row['low'], vwap) - (0.85 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
 
-            elif side == 'SELL' and (last_entry - close) >= (0.9 * atr) and sentiment <= -0.05:
+            elif side == 'SELL' and regime == 'TREND_DOWN' and (last_entry - close) >= (0.9 * atr) and sentiment <= -0.05:
                 if prev_row['high'] >= min(vwap, poc) and close < min(vwap, poc) and close < open_p:
                     sl = max(prev_row['high'], vwap) + (0.85 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
             return None
 
-        # 2. โหมดตามเทรนด์ (Imbalance Trend Pullback & Breakdown ตามสูตร V7 Core 100%)
+        # 2. โหมดตามเทรนด์ (Regime Gate: บล็อก POC_PULLBACK ตอน BALANCE_SIDEWAY + SL 0.85 ATR)
         if er >= 0.20 and adx >= 19:
-            if close > vwap and close > ema_macro and sentiment >= 0.06 and dxy_bias >= 0:
+            if regime == 'TREND_UP' and close > vwap and close > ema_macro and sentiment >= 0.06 and dxy_bias >= 0:
                 if prev_row['low'] <= poc and close > poc and close > open_p:
                     sl = min(prev_row['low'], poc) - (0.85 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
-            elif close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
+            elif regime == 'TREND_DOWN' and close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if prev_row['high'] >= poc and close < poc and close < open_p:
                     sl = max(prev_row['high'], poc) + (0.85 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
+            # VAL Breakout (ทำงานได้ทั้งช่วงเริ่มหลุดกรอบ Sideway และ Trend Down)
+            if close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if adx >= 22 and close < val and prev_row['close'] >= val:
                     sl = max(poc, vwap) + (0.85 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
 
-        # 3. โหมด Fade (ปรับจูน NY Liquidity + ใช้ KAMA Macro ช่วยกรองจุดกลับตัว)
+        # 3. โหมด Fade (สำหรับตลาดออกข้าง + SL 0.85 ATR)
         if er < 0.30 and adx < 26:
             if (
                 hour in {6, 7, 12}
