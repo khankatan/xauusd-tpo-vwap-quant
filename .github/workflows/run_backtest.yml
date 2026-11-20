@@ -3,7 +3,10 @@ name: Run XAUUSD TPO+VWAP Backtest
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # อนุญาตให้กดปุ่ม Run เองบนหน้าเว็บ GitHub ได้ตลอดเวลา
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   backtest:
@@ -24,15 +27,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run TPO + VWAP Quant Backtest
+      - name: Run TPO + VWAP Quant Backtest & Build HTML Dashboard
         run: |
           python main_backtest.py
+          python generate_html_dashboard.py
 
-      - name: Upload Trade History & Equity Curve Artifacts
+      - name: Upload HTML Dashboard & CSV Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: backtest-results
+          name: backtest-dashboard-bundle
           path: |
+            outputs/dashboard.html
             outputs/trade_history_export.csv
-            outputs/equity_curve.csv
           retention-days: 30
+
+      - name: Publish Dashboard to Repo (For GitHub Pages)
+        run: |
+          cp outputs/dashboard.html index.html
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f index.html outputs/dashboard.html outputs/trade_history_export.csv
+          git commit -m "Update HTML dashboard and backtest report" || exit 0
+          git push
