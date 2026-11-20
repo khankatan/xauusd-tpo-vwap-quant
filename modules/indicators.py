@@ -6,6 +6,7 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df = df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.sort_values('timestamp').reset_index(drop=True)
+    df['date'] = df['timestamp'].dt.date
 
     # 1. ATR (14)
     high_low = df['high'] - df['low']
@@ -14,27 +15,24 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df['atr'] = tr.ewm(span=14, adjust=False).mean()
 
-    # 2. Session VWAP & Standard Deviation Bands (รีเซ็ตทุกวัน/Session หลัก)
-    df['date'] = df['timestamp'].dt.date
+    # 2. Rolling 24-Hour VWAP (96 แท่ง M15) ป้องกันค่า Std แคบผิดปกติตอนเที่ยงคืน
     df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3.0
     df['pv'] = df['typical_price'] * df['volume']
     df['pv2'] = (df['typical_price'] ** 2) * df['volume']
 
-    grouped = df.groupby('date')
-    cum_vol = grouped['volume'].cumsum().replace(0, np.nan)
-    cum_pv = grouped['pv'].cumsum()
-    cum_pv2 = grouped['pv2'].cumsum()
+    roll_vol = df['volume'].rolling(96, min_periods=20).sum().replace(0, np.nan)
+    roll_pv = df['pv'].rolling(96, min_periods=20).sum()
+    roll_pv2 = df['pv2'].rolling(96, min_periods=20).sum()
 
-    df['vwap'] = cum_pv / cum_vol
-    variance = (cum_pv2 / cum_vol) - (df['vwap'] ** 2)
+    df['vwap'] = roll_pv / roll_vol
+    variance = (roll_pv2 / roll_vol) - (df['vwap'] ** 2)
     df['vwap_std'] = np.sqrt(variance.clip(lower=0))
     df['vwap_upper_1'] = df['vwap'] + df['vwap_std']
     df['vwap_lower_1'] = df['vwap'] - df['vwap_std']
     df['vwap_upper_2'] = df['vwap'] + (2.0 * df['vwap_std'])
     df['vwap_lower_2'] = df['vwap'] - (2.0 * df['vwap_std'])
 
-    # 3. Rolling / Previous Session TPO Profile (POC, VAH, VAL)
-    # คำนวณจากหน้าต่างย้อนหลัง 32 แท่ง M15 (8 ชั่วโมง = 1 Session เต็ม) เพื่อป้องกัน Look-ahead Bias
+    # 3. Rolling Session TPO Profile (32 แท่ง M15 = 8 ชั่วโมง)
     poc_list, vah_list, val_list = [], [], []
     lookback = 32
 
@@ -56,7 +54,6 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
             val_list.append(window['low'].min())
             continue
 
-        # นับจำนวน Time-Price Opportunity (TPO count) ในแต่ละระดับราคา
         tpo_counts = np.zeros(len(bins) - 1)
         for _, row in window.iterrows():
             mask = (bins[:-1] <= row['high']) & (bins[1:] >= row['low'])
@@ -65,7 +62,6 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
         poc_idx = int(np.argmax(tpo_counts))
         poc_price = (bins[poc_idx] + bins[poc_idx + 1]) / 2.0
 
-        # ขยาย Value Area ให้ครอบคลุม 70% ของ TPO ทั้งหมด
         total_tpo = tpo_counts.sum()
         target_tpo = total_tpo * 0.70
         current_tpo = tpo_counts[poc_idx]
