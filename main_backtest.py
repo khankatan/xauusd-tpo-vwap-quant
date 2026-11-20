@@ -32,13 +32,8 @@ def load_data(filepath: str, mt5_server_tz: str = 'Europe/Athens') -> pd.DataFra
             df = df.rename(columns={time_col: 'timestamp'})
         df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
 
-    # จัดการคอลัมน์ Volume (MT5 มักเก็บ Volume จริงไว้ที่ tickvol ส่วน vol เป็น 0)
-    if 'tickvol' in df.columns:
-        df['volume'] = pd.to_numeric(df['tickvol'], errors='coerce').fillna(100.0)
-    elif 'tick_volume' in df.columns:
-        df['volume'] = pd.to_numeric(df['tick_volume'], errors='coerce').fillna(100.0)
-    elif 'volume' not in df.columns or (df['volume'] == 0).all():
-        df['volume'] = 100.0
+    # ล็อก Volume คงที่ 100.0 เพื่อให้ VWAP และ Sentiment คำนวณจากโครงสร้างราคาเปิด-ปิดล้วนๆ เหมือนฐานข้อมูลเดิม
+    df['volume'] = 100.0
 
     # แปลงราคาเป็นตัวเลขให้ครบ
     for col in ['open', 'high', 'low', 'close']:
