@@ -6,6 +6,7 @@ class RiskManager:
         max_daily_dd_pct: float = 0.025,         # ตัดจบที่ 2.5% เพื่อกัน Slippage ทะลุ 3.0%
         contract_size: float = 100.0,            # XAUUSD 1 Lot = 100 oz
         commission_per_lot: float = 7.0,
+        spread_buffer_usd: float = 0.35,         # เผื่อ Spread/Slippage $0.35/oz
         max_pyramiding_positions: int = 3
     ):
         self.initial_capital = initial_capital
@@ -14,6 +15,7 @@ class RiskManager:
         self.max_daily_dd_pct = max_daily_dd_pct
         self.contract_size = contract_size
         self.commission_per_lot = commission_per_lot
+        self.spread_buffer_usd = spread_buffer_usd
         self.max_positions = max_pyramiding_positions
 
         self.current_day = None
@@ -39,14 +41,13 @@ class RiskManager:
             else:
                 risk_per_oz = pos['current_sl'] - pos['entry']
 
-            pos_risk = (risk_per_oz * self.contract_size * pos['lot']) + (self.commission_per_lot * pos['lot'])
+            pos_risk = ((risk_per_oz + self.spread_buffer_usd) * self.contract_size * pos['lot']) + (self.commission_per_lot * pos['lot'])
             if pos_risk > 0:
                 total_risk += pos_risk
         return total_risk
 
     def normalize_sl(self, side: str, entry_price: float, sl_price: float, atr: float) -> float:
-        """บังคับระยะ SL ขั้นต่ำ 0.6 เท่าของ ATR (ไม่แคบจน Lot บวม และไม่กว้างจนถึง 1.15R ยาก)"""
-        min_sl_dist = max(3.5, 0.6 * atr)
+        min_sl_dist = max(4.0, 0.65 * atr)
         raw_dist = abs(entry_price - sl_price)
         final_dist = max(raw_dist, min_sl_dist)
         if side == 'BUY':
@@ -67,10 +68,7 @@ class RiskManager:
         if available_risk_usd < (max_risk_usd * 0.90):
             return 0.0, adjusted_sl
 
-        sl_dist = abs(entry_price - adjusted_sl)
-        if sl_dist <= 0.10:
-            return 0.0, adjusted_sl
-
+        sl_dist = abs(entry_price - adjusted_sl) + self.spread_buffer_usd
         risk_per_lot = (sl_dist * self.contract_size) + self.commission_per_lot
         raw_lot = available_risk_usd / risk_per_lot
         safe_lot = int(raw_lot * 100) / 100.0
