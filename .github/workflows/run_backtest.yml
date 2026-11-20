@@ -1,0 +1,38 @@
+name: Run XAUUSD TPO+VWAP Backtest
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # อนุญาตให้กดปุ่ม Run เองบนหน้าเว็บ GitHub ได้ตลอดเวลา
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run TPO + VWAP Quant Backtest
+        run: |
+          python main_backtest.py
+
+      - name: Upload Trade History & Equity Curve Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: |
+            outputs/trade_history_export.csv
+            outputs/equity_curve.csv
+          retention-days: 30
