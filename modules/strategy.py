@@ -24,7 +24,7 @@ class TpoVwapStrategy:
         if hour not in self.active_hours:
             return None
 
-        if ts.weekday() == 0 and hour < 10:
+        if ts.weekday() == 0 and hour < 1:
             return None
 
         # 1. โหมด Pyramiding Scale-In (ใช้ SL 0.85 ATR + Regime Gate)
