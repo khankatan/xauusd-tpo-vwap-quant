@@ -19,7 +19,7 @@ def load_data(filepath: str) -> pd.DataFrame:
 
 
 def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital: float = 100000.0):
-    print("1. กำลังโหลดข้อมูลและคำนวณ Indicators V7...")
+    print("1. กำลังโหลดข้อมูลและคำนวณ Dynamic KAMA + Adaptive TPO V8...")
     df = load_data(csv_path)
     df = compute_indicators(df)
     df = apply_trend_filter(df)
@@ -33,10 +33,11 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
     equity_records = []
     trade_id_counter = 1
     current_date = None
-    daily_trades_count = 0
     daily_losses_count = 0
+    blocked_sides_today = set()
+    consecutive_losses = 0
 
-    print("2. กำลังรัน Simulation V7 (Q3 Chop Protection + Daily 2-Strike Cooldown)...")
+    print("2. กำลังรัน Simulation V8 (Core 5 Setups Only + Adaptive KAMA + Anti-Streak Throttling)...")
     for i in range(100, len(df)):
         row = df.iloc[i]
         prev_row = df.iloc[i - 1]
@@ -44,8 +45,8 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
 
         if current_date != row['date']:
             current_date = row['date']
-            daily_trades_count = 0
             daily_losses_count = 0
+            blocked_sides_today = set()
 
         is_friday_close = (row['timestamp'].weekday() == 4 and row['timestamp'].hour >= 20)
         force_close_reason = None
@@ -72,6 +73,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                     p_diff = (target_partial - pos['entry']) if pos['side'] == 'BUY' else (pos['entry'] - target_partial)
                     net_p = (p_diff * risk_mgr.contract_size * close_lot) - (risk_mgr.commission_per_lot * close_lot)
                     risk_mgr.equity += net_p
+                    consecutive_losses = 0
 
                     closed_trades.append({
                         'trade_id': pos['id'],
@@ -94,12 +96,6 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
             if force_close_reason:
                 exit_price = row['close']
                 exit_reason = force_close_reason
-            elif pos.get('tp') is not None and pos['side'] == 'BUY' and row['high'] >= pos['tp']:
-                exit_price = pos['tp']
-                exit_reason = 'MICRO_TP'
-            elif pos.get('tp') is not None and pos['side'] == 'SELL' and row['low'] <= pos['tp']:
-                exit_price = pos['tp']
-                exit_reason = 'MICRO_TP'
             elif pos['side'] == 'BUY' and row['low'] <= pos['current_sl']:
                 exit_price = pos['current_sl']
                 exit_reason = 'STEP_LOCK_SL'
@@ -114,8 +110,13 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                 net_pnl = gross_pnl - comm
                 risk_mgr.equity += net_pnl
 
-                if net_pnl < -20.0:  # นับจำนวนไม้ที่แพ้จริงในวันนี้
+                if net_pnl < -20.0:
                     daily_losses_count += 1
+                    blocked_sides_today.add(pos['side'])
+                    if not pos.get('partial_taken', False):
+                        consecutive_losses += 1
+                elif net_pnl > 20.0:
+                    consecutive_losses = 0
 
                 closed_trades.append({
                     'trade_id': pos['id'],
@@ -140,19 +141,13 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
         open_positions = remaining_positions
         open_positions = strategy.manage_step_lock_exits(open_positions, row)
 
-        # ตรวจสอบสัญญาณเข้าใหม่ (หยุดเทรดทันทีหากวันนี้แพ้ครบ 2 ไม้แล้ว - Daily 2-Strike Cooldown)
         if not risk_mgr.daily_halted and not is_friday_close and daily_losses_count < 2:
-            signal = strategy.generate_signal(row, prev_row, open_positions)
-            is_micro = False
-
-            if signal is None:
-                signal = strategy.generate_daily_micro_signal(row, prev_row, open_positions, daily_trades_count)
-                is_micro = True if signal else False
+            signal = strategy.generate_signal(row, prev_row, open_positions, blocked_sides_today)
 
             if signal:
                 orig_risk = risk_mgr.max_risk_pct
-                if is_micro:
-                    risk_mgr.max_risk_pct = 0.0008
+                if consecutive_losses >= 2:
+                    risk_mgr.max_risk_pct = orig_risk * 0.5
 
                 lot, adjusted_sl = risk_mgr.calculate_safe_lot(
                     open_positions,
@@ -175,11 +170,9 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                         'entry': signal['entry'],
                         'initial_sl': adjusted_sl,
                         'current_sl': adjusted_sl,
-                        'tp': signal.get('tp'),
                         'partial_taken': False
                     })
                     trade_id_counter += 1
-                    daily_trades_count += 1
 
         if i % 4 == 0:
             equity_records.append({
