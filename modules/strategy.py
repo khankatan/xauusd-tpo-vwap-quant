@@ -64,7 +64,7 @@ class TpoVwapStrategy:
         # 3. โหมด Fade (ปรับจูน NY Liquidity + ใช้ KAMA Macro ช่วยกรองจุดกลับตัว)
         if er < 0.30 and adx < 26:
             if (
-                hour in {16, 17, 22}
+                hour in {6, 7, 12}
                 and min(row['low'], prev_row['low']) <= min(val, row['vwap_lower_1'])
                 and close > val
                 and close > open_p
