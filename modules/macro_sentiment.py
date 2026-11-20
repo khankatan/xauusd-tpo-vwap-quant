@@ -4,43 +4,37 @@ import pandas as pd
 
 def attach_macro_sentiment(df: pd.DataFrame, use_live_fetch: bool = True) -> pd.DataFrame:
     df = df.copy()
-    df['dxy_bias'] = 0        # +1 = DXY อ่อนค่า (หนุนทองขึ้น), -1 = DXY แข็งค่า (กดดันทองลง)
-    df['oi_regime'] = 'NEUTRAL' # NEW_LONGS, NEW_SHORTS, SHORT_COVERING, LONG_LIQUIDATION
-    df['ls_sentiment'] = 0.0  # คะแนนรวม -1.0 ถึง +1.0
+    df['dxy_bias'] = 0
+    df['oi_regime'] = 'NEUTRAL'
 
     if use_live_fetch:
         try:
             import yfinance as yf
-            start_dt = (df['timestamp'].min() - pd.Timedelta(days=5)).strftime('%Y-%m-%d')
+            start_dt = (df['timestamp'].min() - pd.Timedelta(days=10)).strftime('%Y-%m-%d')
             end_dt = (df['timestamp'].max() + pd.Timedelta(days=2)).strftime('%Y-%m-%d')
 
-            dxy = yf.download('DX-Y.NYB', start=start_dt, end=end_dt, interval='1h', progress=False)
+            # ใช้ interval='1d' เพื่อดึงย้อนหลัง 9 เดือนได้สมบูรณ์ และใช้ shift(1) ป้องกัน Look-ahead Bias
+            dxy = yf.download('DX-Y.NYB', start=start_dt, end=end_dt, interval='1d', progress=False)
             gc = yf.download('GC=F', start=start_dt, end=end_dt, interval='1d', progress=False)
 
             if not dxy.empty:
+                if isinstance(dxy.columns, pd.MultiIndex):
+                    dxy.columns = dxy.columns.get_level_values(0)
                 dxy = dxy.reset_index()
-                dt_col = 'Datetime' if 'Datetime' in dxy.columns else 'Date'
-                dxy['ts'] = pd.to_datetime(dxy[dt_col]).dt.tz_localize(None)
-                dxy['dxy_ret'] = dxy['Close'].pct_change(4)
-                dxy_map = dxy[['ts', 'dxy_ret']].dropna().sort_values('ts')
-
-                df = pd.merge_asof(
-                    df.sort_values('timestamp'),
-                    dxy_map,
-                    left_on='timestamp',
-                    right_on='ts',
-                    direction='backward'
-                )
-                df['dxy_bias'] = np.where(df['dxy_ret'] < -0.001, 1, np.where(df['dxy_ret'] > 0.001, -1, 0))
-                df.drop(columns=['ts', 'dxy_ret'], inplace=True, errors='ignore')
+                dxy['date'] = pd.to_datetime(dxy['Date']).dt.date
+                dxy['dxy_ret'] = dxy['Close'].pct_change().shift(1)
+                dxy['dxy_bias'] = np.where(dxy['dxy_ret'] < -0.0015, 1, np.where(dxy['dxy_ret'] > 0.0015, -1, 0))
+                dxy_dict = dict(zip(dxy['date'], dxy['dxy_bias']))
+                df['dxy_bias'] = df['date'].map(dxy_dict).fillna(0).astype(int)
 
             if not gc.empty:
+                if isinstance(gc.columns, pd.MultiIndex):
+                    gc.columns = gc.columns.get_level_values(0)
                 gc = gc.reset_index()
                 gc['date'] = pd.to_datetime(gc['Date']).dt.date
-                gc['price_chg'] = gc['Close'].diff()
-                gc['vol_chg'] = gc['Volume'].diff()
+                gc['price_chg'] = gc['Close'].diff().shift(1)
+                gc['vol_chg'] = gc['Volume'].diff().shift(1)
 
-                # จำลองพฤติกรรม Open Interest + Price Action ตามหลัก Futures Market
                 conds = [
                     (gc['price_chg'] > 0) & (gc['vol_chg'] > 0),
                     (gc['price_chg'] < 0) & (gc['vol_chg'] > 0),
@@ -55,18 +49,17 @@ def attach_macro_sentiment(df: pd.DataFrame, use_live_fetch: bool = True) -> pd.
         except Exception:
             pass
 
-    # Fallback / Internal Order-Flow Sentiment Proxy (คำนวณจาก Delta Volume & TPO Skew)
     candle_delta = np.where(df['close'] >= df['open'], df['volume'], -df['volume'])
     rolling_delta = pd.Series(candle_delta).rolling(16).sum()
     delta_norm = (rolling_delta / (df['volume'].rolling(16).sum().replace(0, np.nan))).fillna(0).clip(-1, 1)
 
     oi_score = df['oi_regime'].map({
-        'NEW_LONGS': 0.4,
-        'SHORT_COVERING': 0.1,
-        'NEW_SHORTS': -0.4,
-        'LONG_LIQUIDATION': -0.1,
+        'NEW_LONGS': 0.35,
+        'SHORT_COVERING': 0.10,
+        'NEW_SHORTS': -0.35,
+        'LONG_LIQUIDATION': -0.10,
         'NEUTRAL': 0.0
     }).fillna(0.0)
 
-    df['ls_sentiment'] = (0.4 * df['dxy_bias'] + 0.3 * oi_score + 0.3 * delta_norm).clip(-1.0, 1.0)
+    df['ls_sentiment'] = (0.35 * df['dxy_bias'] + 0.30 * oi_score + 0.35 * delta_norm).clip(-1.0, 1.0)
     return df
