@@ -47,5 +47,5 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add -f index.html outputs/dashboard.html outputs/trade_history_export.csv
-          git commit -m "Update HTML dashboard and backtest report" || exit 0
+          git commit -m "Update V8 HTML dashboard and backtest report" || exit 0
           git push
