@@ -45,8 +45,8 @@ class RiskManager:
         return total_risk
 
     def normalize_sl(self, side: str, entry_price: float, sl_price: float, atr: float) -> float:
-        """บังคับระยะ SL ขั้นต่ำอย่างน้อย 0.8 เท่าของ ATR ป้องกัน Lot ใหญ่ผิดปกติจาก SL แคบเกินไป"""
-        min_sl_dist = max(3.0, 0.8 * atr)
+        """บังคับระยะ SL ขั้นต่ำ 0.6 เท่าของ ATR (ไม่แคบจน Lot บวม และไม่กว้างจนถึง 1.15R ยาก)"""
+        min_sl_dist = max(3.5, 0.6 * atr)
         raw_dist = abs(entry_price - sl_price)
         final_dist = max(raw_dist, min_sl_dist)
         if side == 'BUY':
@@ -54,7 +54,6 @@ class RiskManager:
         return round(entry_price + final_dist, 2)
 
     def calculate_safe_lot(self, open_positions: list[dict], side: str, entry_price: float, sl_price: float, atr: float = 5.0) -> tuple[float, float]:
-        """คืนค่า (safe_lot, adjusted_sl) เพื่อให้ระยะ SL จริงตรงกับ Lot Size เสมอ"""
         adjusted_sl = self.normalize_sl(side, entry_price, sl_price, atr)
 
         if self.daily_halted or len(open_positions) >= self.max_positions:
@@ -65,7 +64,6 @@ class RiskManager:
         current_risk_usd = self.get_net_open_risk_usd(open_positions)
         available_risk_usd = max_risk_usd - current_risk_usd
 
-        # ไม่อนุญาตให้เปิดไม้เพิ่ม หากไม้เดิมยังไม่ถูกเลื่อน SL มาล็อกทุน (ต้องเหลือโควตา >= 90%)
         if available_risk_usd < (max_risk_usd * 0.90):
             return 0.0, adjusted_sl
 
