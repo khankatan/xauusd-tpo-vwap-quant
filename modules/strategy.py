@@ -37,12 +37,12 @@ class TpoVwapStrategy:
 
             if side == 'BUY' and regime == 'TREND_UP' and (close - last_entry) >= (0.9 * atr) and sentiment >= 0.05:
                 if prev_row['low'] <= max(vwap, poc) and close > max(vwap, poc) and close > open_p:
-                    sl = min(prev_row['low'], vwap) - (0.85 * atr)
+                    sl = min(prev_row['low'], vwap) - (0.50 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
 
             elif side == 'SELL' and regime == 'TREND_DOWN' and (last_entry - close) >= (0.9 * atr) and sentiment <= -0.05:
                 if prev_row['high'] >= min(vwap, poc) and close < min(vwap, poc) and close < open_p:
-                    sl = max(prev_row['high'], vwap) + (0.85 * atr)
+                    sl = max(prev_row['high'], vwap) + (0.50 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
             return None
 
@@ -50,12 +50,12 @@ class TpoVwapStrategy:
         if er >= 0.20 and adx >= 19:
             if regime == 'TREND_UP' and close > vwap and close > ema_macro and sentiment >= 0.06 and dxy_bias >= 0:
                 if prev_row['low'] <= poc and close > poc and close > open_p:
-                    sl = min(prev_row['low'], poc) - (0.85 * atr)
+                    sl = min(prev_row['low'], poc) - (0.60 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
             elif regime == 'TREND_DOWN' and close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if prev_row['high'] >= poc and close < poc and close < open_p:
-                    sl = max(prev_row['high'], poc) + (0.85 * atr)
+                    sl = max(prev_row['high'], poc) + (0.60 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
             # VAL Breakout ใช้ 0.85 ATR
@@ -74,7 +74,7 @@ class TpoVwapStrategy:
                 and dxy_bias >= 0
                 and sentiment >= -0.15
             ):
-                sl = min(row['low'], prev_row['low']) - (0.85 * atr)
+                sl = min(row['low'], prev_row['low']) - (0.65 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG'}
 
             elif (
@@ -86,7 +86,7 @@ class TpoVwapStrategy:
                 and dxy_bias <= 0
                 and sentiment <= 0.15
             ):
-                sl = max(row['high'], prev_row['high']) + (0.85 * atr)
+                sl = max(row['high'], prev_row['high']) + (0.65 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_SHORT'}
 
         return None
