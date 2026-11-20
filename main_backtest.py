@@ -165,7 +165,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
         open_positions = remaining_positions
         open_positions = strategy.manage_step_lock_exits(open_positions, row)
 
-        if not risk_mgr.daily_halted and not is_friday_close and daily_losses_count < 2:
+        if not risk_mgr.daily_halted and not is_friday_close and daily_losses_count < 1:
             signal = strategy.generate_signal(row, prev_row, open_positions, blocked_sides_today)
 
             if signal:
