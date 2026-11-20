@@ -61,7 +61,7 @@ class TpoVwapStrategy:
             # VAL Breakout ใช้ 0.85 ATR
             if close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if adx >= 22 and close < val and prev_row['close'] >= val:
-                    sl = max(poc, vwap) + (0.6 * atr)
+                    sl = max(poc, vwap) + (0.95 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
 
         # 3. โหมด Fade (คืน 0.65 ATR เพื่อให้เป้า 1.2R ใกล้ขึ้น)
@@ -74,7 +74,7 @@ class TpoVwapStrategy:
                 and dxy_bias >= 0
                 and sentiment >= -0.15
             ):
-                sl = min(row['low'], prev_row['low']) - (0.65 * atr)
+                sl = min(row['low'], prev_row['low']) - (0.95 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG'}
 
             elif (
