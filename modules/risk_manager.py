@@ -44,9 +44,21 @@ class RiskManager:
                 total_risk += pos_risk
         return total_risk
 
-    def calculate_safe_lot(self, open_positions: list[dict], entry_price: float, sl_price: float) -> float:
+    def normalize_sl(self, side: str, entry_price: float, sl_price: float, atr: float) -> float:
+        """บังคับระยะ SL ขั้นต่ำอย่างน้อย 0.8 เท่าของ ATR ป้องกัน Lot ใหญ่ผิดปกติจาก SL แคบเกินไป"""
+        min_sl_dist = max(3.0, 0.8 * atr)
+        raw_dist = abs(entry_price - sl_price)
+        final_dist = max(raw_dist, min_sl_dist)
+        if side == 'BUY':
+            return round(entry_price - final_dist, 2)
+        return round(entry_price + final_dist, 2)
+
+    def calculate_safe_lot(self, open_positions: list[dict], side: str, entry_price: float, sl_price: float, atr: float = 5.0) -> tuple[float, float]:
+        """คืนค่า (safe_lot, adjusted_sl) เพื่อให้ระยะ SL จริงตรงกับ Lot Size เสมอ"""
+        adjusted_sl = self.normalize_sl(side, entry_price, sl_price, atr)
+
         if self.daily_halted or len(open_positions) >= self.max_positions:
-            return 0.0
+            return 0.0, adjusted_sl
 
         base_capital = min(self.equity, self.day_start_equity)
         max_risk_usd = base_capital * self.max_risk_pct
@@ -55,13 +67,13 @@ class RiskManager:
 
         # ไม่อนุญาตให้เปิดไม้เพิ่ม หากไม้เดิมยังไม่ถูกเลื่อน SL มาล็อกทุน (ต้องเหลือโควตา >= 90%)
         if available_risk_usd < (max_risk_usd * 0.90):
-            return 0.0
+            return 0.0, adjusted_sl
 
-        sl_dist = abs(entry_price - sl_price)
-        if sl_dist <= 0.10:  # กัน SL แคบผิดปกติ
-            return 0.0
+        sl_dist = abs(entry_price - adjusted_sl)
+        if sl_dist <= 0.10:
+            return 0.0, adjusted_sl
 
         risk_per_lot = (sl_dist * self.contract_size) + self.commission_per_lot
         raw_lot = available_risk_usd / risk_per_lot
         safe_lot = int(raw_lot * 100) / 100.0
-        return safe_lot if safe_lot >= 0.01 else 0.0
+        return (safe_lot if safe_lot >= 0.01 else 0.0), adjusted_sl
