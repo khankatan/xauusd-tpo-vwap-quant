@@ -19,7 +19,7 @@ def load_data(filepath: str) -> pd.DataFrame:
 
 
 def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital: float = 100000.0):
-    print("1. กำลังโหลดข้อมูลและคำนวณ TPO + VWAP Indicators...")
+    print("1. กำลังโหลดข้อมูลและคำนวณ Rolling 24H VWAP + Session TPO...")
     df = load_data(csv_path)
     df = compute_indicators(df)
     df = apply_trend_filter(df)
@@ -33,8 +33,9 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
     equity_records = []
     trade_id_counter = 1
 
-    print("2. กำลังรัน Simulation (Pyramiding Risk <= 0.25% | Daily DD Limit <= 3%)...")
-    for i in range(35, len(df)):
+    # เริ่มรันตั้งแต่แท่งที่ 100 เพื่อให้ Rolling 24H VWAP (96 แท่ง) คำนวณครบสมบูรณ์ก่อนเปิดไม้แรก
+    print("2. กำลังรัน Simulation V3 (Pyramiding Risk <= 0.25% | Daily DD Limit <= 3%)...")
+    for i in range(100, len(df)):
         row = df.iloc[i]
         prev_row = df.iloc[i - 1]
         risk_mgr.on_new_bar(row['date'], risk_mgr.equity)
@@ -98,7 +99,13 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
         if not risk_mgr.daily_halted and not is_friday_close:
             signal = strategy.generate_signal(row, prev_row, open_positions)
             if signal:
-                lot = risk_mgr.calculate_safe_lot(open_positions, signal['entry'], signal['sl'])
+                lot, adjusted_sl = risk_mgr.calculate_safe_lot(
+                    open_positions,
+                    signal['side'],
+                    signal['entry'],
+                    signal['sl'],
+                    row['atr']
+                )
                 if lot >= 0.01:
                     open_positions.append({
                         'id': trade_id_counter,
@@ -109,12 +116,11 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                         'sentiment': round(row['ls_sentiment'], 3),
                         'lot': lot,
                         'entry': signal['entry'],
-                        'initial_sl': signal['sl'],
-                        'current_sl': signal['sl']
+                        'initial_sl': adjusted_sl,
+                        'current_sl': adjusted_sl
                     })
                     trade_id_counter += 1
 
-        # บันทึก Equity Curve ทุกๆ 4 แท่ง (รายชั่วโมง) เพื่อความเร็วในการแสดงผลบน Dashboard
         if i % 4 == 0:
             equity_records.append({
                 'timestamp': row['timestamp'],
