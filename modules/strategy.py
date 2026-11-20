@@ -1,6 +1,8 @@
 class TpoVwapStrategy:
     def __init__(self, be_buffer: float = 0.35):
         self.be_buffer = be_buffer
+        # คัดเฉพาะชั่วโมงที่ทองคำมีสภาพคล่องและทิศทางชัดเจน (Asia Open, London Core, NY/COMEX Core)
+        self.active_hours = {0, 7, 10, 12, 16, 17, 20, 21, 22}
 
     def generate_signal(self, row, prev_row, open_positions: list[dict]):
         regime = row['regime']
@@ -14,51 +16,49 @@ class TpoVwapStrategy:
         val = row['tpo_val']
         poc = row['tpo_poc']
         atr = row['atr']
+        ema_fast = row['ema_fast']
+        ema_slow = row['ema_slow']
 
-        # กรองช่วงเวลาสภาพคล่องต่ำมาก (04:00 - 06:45 น. เวลาไทย)
         hour = row['timestamp'].hour
-        if 4 <= hour < 7:
+        if hour not in self.active_hours:
             return None
 
-        # 1. โหมด Pyramiding Scale-In (เมื่อมีไม้เปิดอยู่แล้วและปลดล็อก Risk แล้ว)
+        # 1. โหมด Pyramiding Scale-In (เมื่อไม้แรกปลดล็อก Break-Even แล้ว)
         if len(open_positions) > 0:
             side = open_positions[0]['side']
             last_entry = open_positions[-1]['entry']
 
-            if side == 'BUY' and (close - last_entry) >= (1.0 * atr) and sentiment >= 0.0:
+            if side == 'BUY' and (close - last_entry) >= (0.9 * atr) and sentiment >= 0.0:
                 if prev_row['low'] <= max(vwap, poc) and close > max(vwap, poc) and close > open_p:
-                    sl = min(prev_row['low'], vwap) - (0.8 * atr)
+                    sl = min(prev_row['low'], vwap) - (0.5 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
 
-            elif side == 'SELL' and (last_entry - close) >= (1.0 * atr) and sentiment <= 0.0:
+            elif side == 'SELL' and (last_entry - close) >= (0.9 * atr) and sentiment <= 0.0:
                 if prev_row['high'] >= min(vwap, poc) and close < min(vwap, poc) and close < open_p:
-                    sl = max(prev_row['high'], vwap) + (0.8 * atr)
+                    sl = max(prev_row['high'], vwap) + (0.5 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
             return None
 
         # 2. โหมดเข้าไม้แรก (Initial Entry)
-        # Setup A: POC Trend Pullback & Value Area Breakout
+        # Setup A: POC Trend Pullback (เข้าเมื่อย่อทดสอบ POC + VWAP ในทิศทางเทรนด์)
         if regime == 'TREND_UP' and sentiment >= 0.05 and dxy_bias >= 0:
             if prev_row['low'] <= poc and close > poc and close > vwap and close > open_p:
-                sl = min(prev_row['low'], val) - (0.8 * atr)
+                sl = min(prev_row['low'], poc) - (0.6 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
-
-            if adx >= 22 and close > vah and close > vwap and prev_row['close'] <= vah:
-                sl = min(poc, vwap) - (0.8 * atr)
-                return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAH_BREAKOUT'}
 
         elif regime == 'TREND_DOWN' and sentiment <= -0.05 and dxy_bias <= 0:
             if prev_row['high'] >= poc and close < poc and close < vwap and close < open_p:
-                sl = max(prev_row['high'], vah) + (0.8 * atr)
+                sl = max(prev_row['high'], poc) + (0.6 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
+            # VAL Breakdown เฉพาะฝั่งลงที่แรงจริง (ADX >= 22)
             if adx >= 22 and close < val and close < vwap and prev_row['close'] >= val:
-                sl = max(poc, vwap) + (0.8 * atr)
+                sl = max(poc, vwap) + (0.6 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
 
-        # Setup B: Fade Long & Fade Short (ปลดล็อกให้เทรดได้เมื่อ ADX < 25 และใช้กรอบ VWAP +-1SD ซ้อน VAL/VAH)
-        if adx < 25:
-            # Fade Long: ราคาลงไปทดสอบขอบล่าง VAL + VWAP -1SD แล้วดีดกลับปิดเขียวเหนือ VAL
+        # Setup B: Fade Long (ตัวทำกำไร PF 1.24 ใน V3) & Fade Short (จำกัดเฉพาะโครงสร้างหลักขาลง)
+        if adx < 26:
+            # Fade Long: ลงทดสอบ VAL / VWAP -1SD แล้วดีดกลับปิดเขียวเหนือ VAL
             if (
                 min(row['low'], prev_row['low']) <= min(val, row['vwap_lower_1'])
                 and close > val
@@ -66,18 +66,19 @@ class TpoVwapStrategy:
                 and dxy_bias >= 0
                 and sentiment >= -0.15
             ):
-                sl = min(row['low'], prev_row['low']) - (0.9 * atr)
+                sl = min(row['low'], prev_row['low']) - (0.6 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG'}
 
-            # Fade Short: ราคาขึ้นไปทดสอบขอบบน VAH + VWAP +1SD แล้วถูกตบกลับปิดแดงใต้ VAH
+            # Fade Short: ขึ้นทดสอบ VAH / VWAP +1SD แล้วตบกลับปิดแดงใต้ VAH (ต้องอยู่ในโครงสร้าง EMA ขาลงเท่านั้น)
             elif (
-                max(row['high'], prev_row['high']) >= max(vah, row['vwap_upper_1'])
+                ema_fast < ema_slow
+                and max(row['high'], prev_row['high']) >= max(vah, row['vwap_upper_1'])
                 and close < vah
                 and close < open_p
                 and dxy_bias <= 0
                 and sentiment <= 0.15
             ):
-                sl = max(row['high'], prev_row['high']) + (0.9 * atr)
+                sl = max(row['high'], prev_row['high']) + (0.6 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_SHORT'}
 
         return None
@@ -91,7 +92,7 @@ class TpoVwapStrategy:
         close = row['close']
         atr = row['atr']
 
-        # 1. Step-Lock รายไม้ตาม R-Multiple
+        # 1. Step-Lock รายไม้ตาม R-Multiple (เร่ง Break-Even ที่ 1.15R เพื่อลด Full SL และปลดล็อก Pyramiding)
         for pos in open_positions:
             one_r = abs(pos['entry'] - pos['initial_sl'])
             if one_r <= 0:
@@ -100,11 +101,11 @@ class TpoVwapStrategy:
             if pos['side'] == 'BUY':
                 r_mult = (high - pos['entry']) / one_r
                 target_sl = pos['current_sl']
-                if r_mult >= 3.0:
-                    target_sl = max(close - (1.3 * atr), pos['entry'] + (1.6 * one_r))
-                elif r_mult >= 2.2:
-                    target_sl = pos['entry'] + (0.85 * one_r)
-                elif r_mult >= 1.35:
+                if r_mult >= 2.8:
+                    target_sl = max(close - (1.1 * atr), pos['entry'] + (1.5 * one_r))
+                elif r_mult >= 2.0:
+                    target_sl = pos['entry'] + (0.80 * one_r)
+                elif r_mult >= 1.15:
                     target_sl = pos['entry'] + self.be_buffer
 
                 if target_sl > pos['current_sl']:
@@ -113,17 +114,17 @@ class TpoVwapStrategy:
             elif pos['side'] == 'SELL':
                 r_mult = (pos['entry'] - low) / one_r
                 target_sl = pos['current_sl']
-                if r_mult >= 3.0:
-                    target_sl = min(close + (1.3 * atr), pos['entry'] - (1.6 * one_r))
-                elif r_mult >= 2.2:
-                    target_sl = pos['entry'] - (0.85 * one_r)
-                elif r_mult >= 1.35:
+                if r_mult >= 2.8:
+                    target_sl = min(close + (1.1 * atr), pos['entry'] - (1.5 * one_r))
+                elif r_mult >= 2.0:
+                    target_sl = pos['entry'] - (0.80 * one_r)
+                elif r_mult >= 1.15:
                     target_sl = pos['entry'] - self.be_buffer
 
                 if target_sl < pos['current_sl']:
                     pos['current_sl'] = round(target_sl, 2)
 
-        # 2. Basket Floor Protection (เมื่อมี >= 2 ไม้ และไม้ล่าสุดอยู่ที่ Break-Even แล้ว)
+        # 2. Basket Floor Protection
         if len(open_positions) >= 2:
             newest = open_positions[-1]
             if newest['side'] == 'BUY' and newest['current_sl'] >= newest['entry']:
