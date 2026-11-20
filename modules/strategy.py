@@ -1,5 +1,5 @@
 class TpoVwapStrategy:
-    def __init__(self, be_buffer: float = 0.35, max_sl_atr: float = 10.0):
+    def __init__(self, be_buffer: float = 0.35, max_sl_atr: float = 9.0):
         self.be_buffer = be_buffer
         self.max_sl_atr = max_sl_atr
         self.active_hours = {0, 2, 3, 4, 5, 6, 7, 11, 12, 14}
