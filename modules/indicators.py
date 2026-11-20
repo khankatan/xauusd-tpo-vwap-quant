@@ -8,16 +8,14 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df = df.sort_values('timestamp').reset_index(drop=True)
     df['date'] = df['timestamp'].dt.date
 
-    # 1. ATR (14) และ ATR Ratio
+    # 1. ATR (14)
     high_low = df['high'] - df['low']
     high_close = (df['high'] - df['close'].shift()).abs()
     low_close = (df['low'] - df['close'].shift()).abs()
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     df['atr'] = tr.ewm(span=14, adjust=False).mean()
-    df['atr_baseline'] = df['atr'].rolling(96, min_periods=20).mean().fillna(df['atr'])
-    df['atr_ratio'] = (df['atr'] / df['atr_baseline'].replace(0, np.nan)).fillna(1.0)
 
-    # 2. Rolling 24-Hour VWAP (96 แท่ง M15) + Z-Score Distance (หน่วย ATR)
+    # 2. Rolling 24-Hour VWAP (96 แท่ง M15)
     df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3.0
     df['pv'] = df['typical_price'] * df['volume']
     df['pv2'] = (df['typical_price'] ** 2) * df['volume']
@@ -33,15 +31,12 @@ def compute_indicators(df: pd.DataFrame, tick_size: float = 0.50) -> pd.DataFram
     df['vwap_lower_1'] = df['vwap'] - df['vwap_std']
     df['vwap_upper_2'] = df['vwap'] + (2.0 * df['vwap_std'])
     df['vwap_lower_2'] = df['vwap'] - (2.0 * df['vwap_std'])
-    df['vwap_z_atr'] = ((df['close'] - df['vwap']) / df['atr'].replace(0, np.nan)).fillna(0.0)
 
-    # 3. Session TPO Profile (ใช้ค่ามาตรฐาน 32 แท่งที่แม่นยำกับ V7 Core และปรับลดเหลือ 24 แท่งเฉพาะตอนผันผวนจัด)
+    # 3. Session TPO Profile (มาตรฐาน 32 แท่ง = 8 ชม. ตามสูตร V7 Core)
     poc_list, vah_list, val_list = [], [], []
+    lookback = 32
 
     for i in range(len(df)):
-        ratio = df['atr_ratio'].iloc[i]
-        lookback = 24 if ratio > 1.25 else 32
-
         if i < lookback:
             poc_list.append(df['close'].iloc[i])
             vah_list.append(df['high'].iloc[i])
