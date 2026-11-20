@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 
-def compute_kama(series: pd.Series, er_period: int = 16, fast_sc: int = 4, slow_sc: int = 60) -> pd.Series:
+def compute_kama(series: pd.Series, er_period: int = 20, fast_sc: int = 4, slow_sc: int = 80) -> pd.Series:
     close_vals = series.values
     n = len(close_vals)
     kama = np.full(n, np.nan)
@@ -26,15 +26,12 @@ def compute_kama(series: pd.Series, er_period: int = 16, fast_sc: int = 4, slow_
 def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # 1. โครงสร้างเทรนด์ใหญ่คงที่ (แบบ V7 Core สำหรับกวาดกำไรเดือนเทรนด์ใหญ่)
+    df['ema_fast'] = df['close'].ewm(span=32, adjust=False).mean()
+    df['ema_slow'] = df['close'].ewm(span=96, adjust=False).mean()
     df['ema_macro'] = df['close'].ewm(span=288, adjust=False).mean()
+    df['kama_macro'] = compute_kama(df['close'], er_period=24, fast_sc=6, slow_sc=90)
 
-    # 2. โครงสร้างไดนามิก KAMA (สำหรับคัดกรองช่วงตลาดออกข้าง/สวิงหลอก)
-    df['kama_fast'] = compute_kama(df['close'], er_period=12, fast_sc=3, slow_sc=36)
-    df['kama_macro'] = compute_kama(df['close'], er_period=28, fast_sc=6, slow_sc=90)
-    df['kama_slope'] = ((df['kama_macro'] - df['kama_macro'].shift(4)) / df['atr']).fillna(0.0)
-
-    # 3. Meta-Filter วัดคุณภาพเทรนด์ (Efficiency Ratio 20 แท่ง + ADX 14)
+    # Kaufman Efficiency Ratio (KER 20 แท่ง)
     net_change = (df['close'] - df['close'].shift(20)).abs()
     sum_volatility = df['close'].diff().abs().rolling(20).sum().replace(0, np.nan)
     df['efficiency_ratio'] = (net_change / sum_volatility).fillna(0.2)
@@ -50,15 +47,12 @@ def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     dx = (np.abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)) * 100
     df['adx'] = dx.ewm(span=14).mean().fillna(20)
 
-    # Meta-Routing Rule:
-    # - ถ้าตลาดเป็น Macro Trend ชัด (ER >= 0.21 และ ADX >= 19) -> ใช้ EMA288 + VWAP แบบ V7 Core (ไม่โดน KAMA ตัดรอบไวเกินไป)
-    # - ถ้าตลาดไม่ชัด (ER < 0.21) -> บังคับให้ KAMA Fast & Slope เห็นพ้องด้วย มิฉะนั้นปัดเป็น BALANCE_SIDEWAY ทันที
-    strong_trend = (df['efficiency_ratio'] >= 0.21) & (df['adx'] >= 19)
-    dynamic_confirm_up = (df['kama_fast'] > df['kama_macro']) & (df['kama_slope'] > 0.0)
-    dynamic_confirm_dn = (df['kama_fast'] < df['kama_macro']) & (df['kama_slope'] < 0.0)
+    is_clean_trend = (df['adx'] >= 20) & (df['efficiency_ratio'] >= 0.25)
 
-    is_up = (df['close'] > df['vwap']) & (df['close'] > df['ema_macro']) & (strong_trend | ((df['adx'] >= 19) & dynamic_confirm_up))
-    is_dn = (df['close'] < df['vwap']) & (df['close'] < df['ema_macro']) & (strong_trend | ((df['adx'] >= 19) & dynamic_confirm_dn))
-
-    df['regime'] = np.select([is_up, is_dn], ['TREND_UP', 'TREND_DOWN'], default='BALANCE_SIDEWAY')
+    conditions = [
+        is_clean_trend & (df['close'] > df['vwap']) & (df['ema_fast'] > df['ema_slow']) & (df['close'] > df['ema_macro']),
+        is_clean_trend & (df['close'] < df['vwap']) & (df['ema_fast'] < df['ema_slow']) & (df['close'] < df['ema_macro']),
+    ]
+    choices = ['TREND_UP', 'TREND_DOWN']
+    df['regime'] = np.select(conditions, choices, default='BALANCE_SIDEWAY')
     return df
