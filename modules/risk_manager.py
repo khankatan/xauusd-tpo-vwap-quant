@@ -2,7 +2,7 @@ class RiskManager:
     def __init__(
         self,
         initial_capital: float = 100000.0,
-        max_risk_per_trade_pct: float = 0.0036,  # 0.25%
+        max_risk_per_trade_pct: float = 0.004,  # 0.25%
         max_daily_dd_pct: float = 0.025,         # ตัดจบที่ 2.5% เพื่อกัน Slippage ทะลุ 3.0%
         contract_size: float = 100.0,            # XAUUSD 1 Lot = 100 oz
         commission_per_lot: float = 7.0,
