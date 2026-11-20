@@ -72,7 +72,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
             daily_losses_count = 0
             blocked_sides_today = set()
 
-        is_friday_close = (row['timestamp'].weekday() == 4 and row['timestamp'].hour >= 20)
+        is_friday_close = (row['timestamp'].weekday() == 4 and row['timestamp'].hour >= 10)
         force_close_reason = None
         if risk_mgr.daily_halted:
             force_close_reason = 'DAILY_DD_CIRCUIT_BREAKER'
