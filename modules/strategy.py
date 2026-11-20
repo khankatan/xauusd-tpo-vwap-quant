@@ -6,6 +6,7 @@ class TpoVwapStrategy:
         regime = row['regime']
         sentiment = row['ls_sentiment']
         dxy_bias = row['dxy_bias']
+        adx = row['adx']
         close = row['close']
         open_p = row['open']
         vwap = row['vwap']
@@ -36,43 +37,48 @@ class TpoVwapStrategy:
             return None
 
         # 2. โหมดเข้าไม้แรก (Initial Entry)
-        # Setup A: TPO Value Area Breakout (พระเอกที่ทำ PF 1.7 - 4.1)
+        # Setup A: POC Trend Pullback & Value Area Breakout
         if regime == 'TREND_UP' and sentiment >= 0.05 and dxy_bias >= 0:
-            if close > vah and close > vwap and prev_row['close'] <= vah:
-                sl = min(poc, vwap) - (0.7 * atr)
-                return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAH_BREAKOUT'}
-
-            # Setup B (ใหม่): ย่อทดสอบ POC + VWAP Confluence ในเทรนด์ขาขึ้น
             if prev_row['low'] <= poc and close > poc and close > vwap and close > open_p:
-                sl = min(prev_row['low'], val) - (0.6 * atr)
+                sl = min(prev_row['low'], val) - (0.8 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
-        elif regime == 'TREND_DOWN' and sentiment <= -0.05 and dxy_bias <= 0:
-            if close < val and close < vwap and prev_row['close'] >= val:
-                sl = max(poc, vwap) + (0.7 * atr)
-                return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
+            if adx >= 22 and close > vah and close > vwap and prev_row['close'] <= vah:
+                sl = min(poc, vwap) - (0.8 * atr)
+                return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAH_BREAKOUT'}
 
-            # Setup B (ใหม่): เด้งทดสอบ POC + VWAP Confluence ในเทรนด์ขาลง
+        elif regime == 'TREND_DOWN' and sentiment <= -0.05 and dxy_bias <= 0:
             if prev_row['high'] >= poc and close < poc and close < vwap and close < open_p:
-                sl = max(prev_row['high'], vah) + (0.6 * atr)
+                sl = max(prev_row['high'], vah) + (0.8 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
-        # Setup C: Sideway Mean Reversion (เฉพาะฝั่ง Short ที่แม่นยำ และบังคับ Long ต้องมีแท่งเขียวกลืนกิน + ไม่สวน DXY)
-        elif regime == 'BALANCE_SIDEWAY':
-            if row['high'] >= row['vwap_upper_2'] and close < vah and close < open_p and sentiment <= 0.10:
-                sl = row['high'] + (0.9 * atr)
-                return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_SHORT'}
+            if adx >= 22 and close < val and close < vwap and prev_row['close'] >= val:
+                sl = max(poc, vwap) + (0.8 * atr)
+                return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
 
-            elif (
-                row['low'] <= row['vwap_lower_2']
+        # Setup B: Fade Long & Fade Short (ปลดล็อกให้เทรดได้เมื่อ ADX < 25 และใช้กรอบ VWAP +-1SD ซ้อน VAL/VAH)
+        if adx < 25:
+            # Fade Long: ราคาลงไปทดสอบขอบล่าง VAL + VWAP -1SD แล้วดีดกลับปิดเขียวเหนือ VAL
+            if (
+                min(row['low'], prev_row['low']) <= min(val, row['vwap_lower_1'])
                 and close > val
                 and close > open_p
-                and close > prev_row['high']  # บังคับ Bullish Confirmation กันรับมีด
                 and dxy_bias >= 0
-                and sentiment >= 0.0
+                and sentiment >= -0.15
             ):
                 sl = min(row['low'], prev_row['low']) - (0.9 * atr)
-                return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG_CONFIRMED'}
+                return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG'}
+
+            # Fade Short: ราคาขึ้นไปทดสอบขอบบน VAH + VWAP +1SD แล้วถูกตบกลับปิดแดงใต้ VAH
+            elif (
+                max(row['high'], prev_row['high']) >= max(vah, row['vwap_upper_1'])
+                and close < vah
+                and close < open_p
+                and dxy_bias <= 0
+                and sentiment <= 0.15
+            ):
+                sl = max(row['high'], prev_row['high']) + (0.9 * atr)
+                return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_SHORT'}
 
         return None
 
@@ -85,6 +91,7 @@ class TpoVwapStrategy:
         close = row['close']
         atr = row['atr']
 
+        # 1. Step-Lock รายไม้ตาม R-Multiple
         for pos in open_positions:
             one_r = abs(pos['entry'] - pos['initial_sl'])
             if one_r <= 0:
@@ -97,7 +104,7 @@ class TpoVwapStrategy:
                     target_sl = max(close - (1.3 * atr), pos['entry'] + (1.6 * one_r))
                 elif r_mult >= 2.2:
                     target_sl = pos['entry'] + (0.85 * one_r)
-                elif r_mult >= 1.35:  # ขยับจุด Break-Even จาก 1.0R เป็น 1.35R ลดการโดนดีดออกฟรี
+                elif r_mult >= 1.35:
                     target_sl = pos['entry'] + self.be_buffer
 
                 if target_sl > pos['current_sl']:
@@ -116,6 +123,7 @@ class TpoVwapStrategy:
                 if target_sl < pos['current_sl']:
                     pos['current_sl'] = round(target_sl, 2)
 
+        # 2. Basket Floor Protection (เมื่อมี >= 2 ไม้ และไม้ล่าสุดอยู่ที่ Break-Even แล้ว)
         if len(open_positions) >= 2:
             newest = open_positions[-1]
             if newest['side'] == 'BUY' and newest['current_sl'] >= newest['entry']:
