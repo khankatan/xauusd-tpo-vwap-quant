@@ -87,7 +87,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
 
             # Partial TP 50% ที่ +1.2R
             if not pos.get('partial_taken', False) and pos['lot'] >= 0.02 and one_r > 0:
-                target_partial = (pos['entry'] + 0.95 * one_r) if pos['side'] == 'BUY' else (pos['entry'] - 1.2 * one_r)
+                target_partial = (pos['entry'] + 1.2 * one_r) if pos['side'] == 'BUY' else (pos['entry'] - 1.2 * one_r)
                 hit_partial = (row['high'] >= target_partial) if pos['side'] == 'BUY' else (row['low'] <= target_partial)
 
                 if hit_partial:
