@@ -19,7 +19,7 @@ def load_data(filepath: str) -> pd.DataFrame:
 
 
 def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital: float = 100000.0):
-    print("1. กำลังโหลดข้อมูลและคำนวณ Indicators V6...")
+    print("1. กำลังโหลดข้อมูลและคำนวณ Indicators V7...")
     df = load_data(csv_path)
     df = compute_indicators(df)
     df = apply_trend_filter(df)
@@ -34,8 +34,9 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
     trade_id_counter = 1
     current_date = None
     daily_trades_count = 0
+    daily_losses_count = 0
 
-    print("2. กำลังรัน Simulation V6 (Partial TP +1.2R + Daily Micro Engine)...")
+    print("2. กำลังรัน Simulation V7 (Q3 Chop Protection + Daily 2-Strike Cooldown)...")
     for i in range(100, len(df)):
         row = df.iloc[i]
         prev_row = df.iloc[i - 1]
@@ -44,6 +45,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
         if current_date != row['date']:
             current_date = row['date']
             daily_trades_count = 0
+            daily_losses_count = 0
 
         is_friday_close = (row['timestamp'].weekday() == 4 and row['timestamp'].hour >= 20)
         force_close_reason = None
@@ -58,7 +60,7 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
             exit_reason = None
             one_r = abs(pos['entry'] - pos['initial_sl'])
 
-            # ตรวจสอบ Partial TP (ปิดกำไร 50% ทันทีที่วิ่งถึง +1.2R เพื่อแก้ปัญหาโดนดีดชน Break-Even)
+            # Partial TP 50% ที่ +1.2R
             if not pos.get('partial_taken', False) and pos['lot'] >= 0.02 and one_r > 0:
                 target_partial = (pos['entry'] + 1.2 * one_r) if pos['side'] == 'BUY' else (pos['entry'] - 1.2 * one_r)
                 hit_partial = (row['high'] >= target_partial) if pos['side'] == 'BUY' else (row['low'] <= target_partial)
@@ -89,7 +91,6 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                         'equity_after': round(risk_mgr.equity, 2)
                     })
 
-            # ตรวจสอบจุดออกทั้งหมดของไม้ (SL, TP ตายตัวของ Micro Engine, หรือ Force Close)
             if force_close_reason:
                 exit_price = row['close']
                 exit_reason = force_close_reason
@@ -112,6 +113,9 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                 comm = risk_mgr.commission_per_lot * pos['lot']
                 net_pnl = gross_pnl - comm
                 risk_mgr.equity += net_pnl
+
+                if net_pnl < -20.0:  # นับจำนวนไม้ที่แพ้จริงในวันนี้
+                    daily_losses_count += 1
 
                 closed_trades.append({
                     'trade_id': pos['id'],
@@ -136,8 +140,8 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
         open_positions = remaining_positions
         open_positions = strategy.manage_step_lock_exits(open_positions, row)
 
-        # ตรวจสอบสัญญาณเข้าใหม่ (Main Engine ก่อน ถ้าไม่มีค่อยเช็ก Daily Micro Engine)
-        if not risk_mgr.daily_halted and not is_friday_close:
+        # ตรวจสอบสัญญาณเข้าใหม่ (หยุดเทรดทันทีหากวันนี้แพ้ครบ 2 ไม้แล้ว - Daily 2-Strike Cooldown)
+        if not risk_mgr.daily_halted and not is_friday_close and daily_losses_count < 2:
             signal = strategy.generate_signal(row, prev_row, open_positions)
             is_micro = False
 
@@ -146,7 +150,6 @@ def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital:
                 is_micro = True if signal else False
 
             if signal:
-                # ถ้าเป็น Daily Micro Engine ลดความเสี่ยงเหลือ 0.08% (ประมาณ 1/3 ของไม้หลัก)
                 orig_risk = risk_mgr.max_risk_pct
                 if is_micro:
                     risk_mgr.max_risk_pct = 0.0008
