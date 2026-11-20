@@ -1,7 +1,6 @@
 class TpoVwapStrategy:
     def __init__(self, be_buffer: float = 0.35):
         self.be_buffer = be_buffer
-        # คงชั่วโมงเทรดครบทั้ง 10 ชั่วโมง (True UTC) ไม่ตัดชั่วโมงเพื่อกัน Overfitting
         self.active_hours = {0, 2, 3, 4, 5, 6, 7, 11, 12, 14}
 
     def generate_signal(self, row, prev_row, open_positions: list[dict], blocked_sides_today: set = None):
@@ -28,7 +27,7 @@ class TpoVwapStrategy:
         if ts.weekday() == 0 and hour < 10:
             return None
 
-        # 1. โหมด Pyramiding Scale-In (Regime Gate: ยิงเฉพาะตอน TREND_UP / TREND_DOWN + SL 0.85 ATR)
+        # 1. โหมด Pyramiding Scale-In (ใช้ SL 0.85 ATR + Regime Gate)
         if len(open_positions) > 0:
             if er < 0.20:
                 return None
@@ -47,25 +46,25 @@ class TpoVwapStrategy:
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'PYRAMID_VWAP_PULLBACK'}
             return None
 
-        # 2. โหมดตามเทรนด์ (Regime Gate: บล็อก POC_PULLBACK ตอน BALANCE_SIDEWAY + SL 0.85 ATR)
+        # 2. โหมดตามเทรนด์ (POC Pullback คืน 0.60 ATR + VAL Breakout ใช้ 0.85 ATR)
         if er >= 0.20 and adx >= 19:
             if regime == 'TREND_UP' and close > vwap and close > ema_macro and sentiment >= 0.06 and dxy_bias >= 0:
                 if prev_row['low'] <= poc and close > poc and close > open_p:
-                    sl = min(prev_row['low'], poc) - (0.85 * atr)
+                    sl = min(prev_row['low'], poc) - (0.60 * atr)
                     return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
             elif regime == 'TREND_DOWN' and close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if prev_row['high'] >= poc and close < poc and close < open_p:
-                    sl = max(prev_row['high'], poc) + (0.85 * atr)
+                    sl = max(prev_row['high'], poc) + (0.60 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_POC_TREND_PULLBACK'}
 
-            # VAL Breakout (ทำงานได้ทั้งช่วงเริ่มหลุดกรอบ Sideway และ Trend Down)
+            # VAL Breakout ใช้ 0.85 ATR
             if close < vwap and close < ema_macro and sentiment <= -0.06 and dxy_bias <= 0:
                 if adx >= 22 and close < val and prev_row['close'] >= val:
                     sl = max(poc, vwap) + (0.85 * atr)
                     return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VAL_BREAKOUT'}
 
-        # 3. โหมด Fade (สำหรับตลาดออกข้าง + SL 0.85 ATR)
+        # 3. โหมด Fade (คืน 0.65 ATR เพื่อให้เป้า 1.2R ใกล้ขึ้น)
         if er < 0.30 and adx < 26:
             if (
                 hour in {6, 7, 12}
@@ -75,7 +74,7 @@ class TpoVwapStrategy:
                 and dxy_bias >= 0
                 and sentiment >= -0.15
             ):
-                sl = min(row['low'], prev_row['low']) - (0.85 * atr)
+                sl = min(row['low'], prev_row['low']) - (0.65 * atr)
                 return {'side': 'BUY', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_LONG'}
 
             elif (
@@ -87,7 +86,7 @@ class TpoVwapStrategy:
                 and dxy_bias <= 0
                 and sentiment <= 0.15
             ):
-                sl = max(row['high'], prev_row['high']) + (0.85 * atr)
+                sl = max(row['high'], prev_row['high']) + (0.65 * atr)
                 return {'side': 'SELL', 'entry': close, 'sl': round(sl, 2), 'setup': 'TPO_VWAP_FADE_SHORT'}
 
         return None
@@ -113,7 +112,7 @@ class TpoVwapStrategy:
                     target_sl = max(close - (1.1 * atr), pos['entry'] + (1.5 * one_r))
                 elif r_mult >= 2.0:
                     target_sl = pos['entry'] + (0.80 * one_r)
-                elif r_mult >= 0.95:
+                elif r_mult >= 1.2:
                     target_sl = pos['entry'] + self.be_buffer
 
                 if target_sl > pos['current_sl']:
@@ -126,7 +125,7 @@ class TpoVwapStrategy:
                     target_sl = min(close + (1.1 * atr), pos['entry'] - (1.5 * one_r))
                 elif r_mult >= 2.0:
                     target_sl = pos['entry'] - (0.80 * one_r)
-                elif r_mult >= 0.95:
+                elif r_mult >= 1.2:
                     target_sl = pos['entry'] - self.be_buffer
 
                 if target_sl < pos['current_sl']:
