@@ -113,7 +113,7 @@ class TpoVwapStrategy:
                     target_sl = max(close - (1.1 * atr), pos['entry'] + (1.5 * one_r))
                 elif r_mult >= 2.0:
                     target_sl = pos['entry'] + (0.80 * one_r)
-                elif r_mult >= 1.2:
+                elif r_mult >= 0.95:
                     target_sl = pos['entry'] + self.be_buffer
 
                 if target_sl > pos['current_sl']:
@@ -126,7 +126,7 @@ class TpoVwapStrategy:
                     target_sl = min(close + (1.1 * atr), pos['entry'] - (1.5 * one_r))
                 elif r_mult >= 2.0:
                     target_sl = pos['entry'] - (0.80 * one_r)
-                elif r_mult >= 1.2:
+                elif r_mult >= 0.95:
                     target_sl = pos['entry'] - self.be_buffer
 
                 if target_sl < pos['current_sl']:
