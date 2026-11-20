@@ -27,9 +27,9 @@ def compute_kama(series: pd.Series, er_period: int = 16, fast_sc: int = 4, slow_
 def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # แทนที่ EMA ค่าคงที่ด้วย KAMA แบบไดนามิก 2 ระดับ (Fast Adaptive & Macro Adaptive)
-    df['kama_fast'] = compute_kama(df['close'], er_period=14, fast_sc=3, slow_sc=40)
-    df['kama_macro'] = compute_kama(df['close'], er_period=32, fast_sc=8, slow_sc=120)
+    # Dynamic KAMA: Fast (โครงสร้างระยะสั้น) และ Macro (แนวโน้มหลักแบบไดนามิก)
+    df['kama_fast'] = compute_kama(df['close'], er_period=12, fast_sc=3, slow_sc=36)
+    df['kama_macro'] = compute_kama(df['close'], er_period=32, fast_sc=8, slow_sc=100)
     df['kama_slope'] = ((df['kama_macro'] - df['kama_macro'].shift(4)) / df['atr']).fillna(0.0)
 
     # Kaufman Efficiency Ratio (KER 20 แท่ง)
@@ -48,11 +48,12 @@ def apply_trend_filter(df: pd.DataFrame) -> pd.DataFrame:
     dx = (np.abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan)) * 100
     df['adx'] = dx.ewm(span=14).mean().fillna(20)
 
-    is_clean_trend = (df['adx'] >= 19) & (df['efficiency_ratio'] >= 0.20)
+    # แยกทิศทางเทรนด์หลักออกจากราคาปิดของแท่งย่อตัว เพื่อให้สัญญาณ Pullback แตะ POC/VWAP ทำงานได้ไม่ติดล็อก
+    is_trend_env = (df['adx'] >= 18) & (df['efficiency_ratio'] >= 0.18)
 
     conditions = [
-        is_clean_trend & (df['close'] > df['kama_fast']) & (df['kama_fast'] > df['kama_macro']) & (df['kama_slope'] > 0.02),
-        is_clean_trend & (df['close'] < df['kama_fast']) & (df['kama_fast'] < df['kama_macro']) & (df['kama_slope'] < -0.02),
+        is_trend_env & (df['kama_fast'] > df['kama_macro']) & (df['kama_slope'] > 0.0),
+        is_trend_env & (df['kama_fast'] < df['kama_macro']) & (df['kama_slope'] < 0.0),
     ]
     choices = ['TREND_UP', 'TREND_DOWN']
     df['regime'] = np.select(conditions, choices, default='BALANCE_SIDEWAY')
