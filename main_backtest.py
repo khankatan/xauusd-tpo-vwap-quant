@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import zipfile
 from modules.indicators import compute_indicators
 from modules.trend_filter import apply_trend_filter
 from modules.macro_sentiment import attach_macro_sentiment
@@ -9,7 +10,31 @@ from modules.strategy import TpoVwapStrategy
 
 def load_data(filepath: str, mt5_server_tz: str = 'Europe/Athens') -> pd.DataFrame:
     # ตรวจจับตัวคั่นอัตโนมัติ (รองรับทั้ง , \t และ ;)
-    df = pd.read_csv(filepath, sep=None, engine='python')
+    def _read_csv_robust(file_obj):
+        for enc in ('utf-8-sig', 'utf-16', 'latin1'):
+            for sep in ('\t', ',', ';'):
+                try:
+                    if hasattr(file_obj, 'seek'):
+                        file_obj.seek(0)
+                    tmp = pd.read_csv(file_obj, sep=sep, encoding=enc)
+                    if tmp.shape[1] >= 5:
+                        return tmp
+                except Exception:
+                    continue
+        raise ValueError(f"ไม่สามารถอ่านไฟล์ CSV จาก {filepath} ได้")
+
+    if str(filepath).lower().endswith('.zip'):
+        with zipfile.ZipFile(filepath, 'r') as z:
+            csv_names = [
+                n for n in z.namelist()
+                if n.lower().endswith('.csv') and '__MACOSX' not in n and not n.split('/')[-1].startswith('._')
+            ]
+            if not csv_names:
+                raise ValueError(f"ไม่พบไฟล์ .csv ใน {filepath}")
+            with z.open(csv_names[0]) as f:
+                df = _read_csv_robust(f)
+    else:
+        df = _read_csv_robust(filepath)
 
     # ล้างช่องว่างและเครื่องหมาย < > ออกจากชื่อคอลัมน์ทั้งหมด
     df.columns = [c.strip().strip('<>').lower() for c in df.columns]
