@@ -42,7 +42,7 @@ def load_data(filepath: str, mt5_server_tz: str = 'Europe/Athens') -> pd.DataFra
     return df.dropna(subset=['open', 'high', 'low', 'close']).reset_index(drop=True)
 
 
-def run_backtest(csv_path: str = 'data/xauusd_m15_history.csv', initial_capital: float = 100000.0):
+def run_backtest(csv_path: str = 'data/xauusd_m15_history.zip', initial_capital: float = 100000.0):
     print("1. กำลังโหลดข้อมูลและคำนวณ Dynamic KAMA + Adaptive TPO V8...")
     df = load_data(csv_path)
     df = compute_indicators(df)
